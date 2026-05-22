@@ -255,7 +255,10 @@ I CSV extra sono caricati direttamente dal notebook senza toccare il dataset pro
 
 1. **Monitorare la stagione 2025/26** — il monitor ROI nel tab Strategia Mista dirà se siamo in una nuova stagione "calda"
 2. **Riaddestrare con 9 stagioni** — valutare se aggiungere le stagioni 1617-1920 al training migliora l'accuratezza del modello ML
-3. **App Android** — seconda idea discussa, da sviluppare separatamente
+3. **API layer (FastAPI)** — esporre `/predictions`, `/signals`, `/roi` per l'integrazione con il betting-agent
+4. **App Android** — seconda idea discussa, da sviluppare separatamente
+
+Vedi piano completo dell'ecosistema: `/home/egiabot/PROJECT/BettingEcosystem.md`
 
 ---
 
