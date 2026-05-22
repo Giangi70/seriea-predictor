@@ -7,7 +7,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.prediction.predict import predict_match
 from src.scraper.odds_live import get_upcoming_odds, get_mock_odds
-from src.db.storage import init_db, save_prediction, set_result, get_all_predictions, get_roi_stats, get_pending_predictions, save_odds_cache, load_odds_cache
+from src.db.storage import init_db, save_prediction, set_result, get_all_predictions, get_roi_stats, get_pending_predictions, save_odds_cache, load_odds_cache, save_strategia_mista, get_strategia_mista, set_result_strategia, get_roi_strategia
 from src.db.update_results import auto_update_results
 from config.config import ODDS_API_KEY, DATA_PROCESSED, DATA_EXPORTS, MODELS_DIR
 
@@ -43,7 +43,7 @@ with st.sidebar:
         st.write(f"📊 {len(df_info)} partite nel dataset")
 
 # ── Tab principali ────────────────────────────────────────────────────────────
-tab_pred, tab_manual, tab_update, tab_history = st.tabs(["🔮 Predizioni giornata", "✏️ Inserimento manuale", "🔄 Aggiorna dataset", "📊 Storico"])
+tab_pred, tab_manual, tab_update, tab_history, tab_strategia = st.tabs(["🔮 Predizioni giornata", "✏️ Inserimento manuale", "🔄 Aggiorna dataset", "📊 Storico", "🎯 Strategia Mista"])
 
 # ── Tab 1: Predizioni automatiche ────────────────────────────────────────────
 with tab_pred:
@@ -292,6 +292,222 @@ with tab_history:
                 "match_date": "Data", "home_team": "Casa", "away_team": "Trasferta",
                 "prediction": "Pred", "prob_h": "P(H)", "prob_d": "P(D)", "prob_a": "P(A)",
                 "value_bet": "VB", "avg_odds": "Quota", "result": "Risultato",
+            }),
+            use_container_width=True, hide_index=True,
+        )
+
+# ── Tab 5: Strategia Mista ────────────────────────────────────────────────────
+with tab_strategia:
+    import numpy as np
+
+    # Parametri strategia (ottimizzati dall'analisi storica)
+    N_SAFE       = 9      # partite su cui giocare l'esito più probabile
+    N_JOLLY      = 1      # partite su cui giocare la quota più alta
+    MIN_GAP      = 0.15   # gap minimo tra prob_max e prob_seconda
+    MIN_Q_JOLLY  = 5.0    # quota minima per il jolly
+    # Soglia ROI "stagione calda": se il ROI stagionale supera questa soglia → alert
+    ROI_ALERT_THRESHOLD = 0.08   # +8% (storico: stagioni calde erano >10%)
+    SEASON_START = "2025-08-01"  # inizio stagione corrente
+
+    st.subheader("🎯 Strategia Mista — 9 safe + 1 jolly")
+    st.caption(
+        f"Parametri: {N_SAFE} partite sull'esito più probabile + {N_JOLLY} jolly (quota > {MIN_Q_JOLLY}) | "
+        f"Filtro gap probabilità ≥ {MIN_GAP:.0%} | Alert ROI stagionale > {ROI_ALERT_THRESHOLD:.0%}"
+    )
+
+    # ── Monitor ROI stagione corrente ─────────────────────────────────────────
+    stats_s = get_roi_strategia(season_start=SEASON_START)
+    stats_all = get_roi_strategia()
+
+    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a.metric("Scommesse stagione", stats_s["n"])
+    col_b.metric("P&L stagione (€)", f"{stats_s['pl']:+.2f}" if stats_s["n"] else "—")
+    roi_s_val = stats_s["roi"]
+    col_c.metric(
+        "ROI stagione",
+        f"{roi_s_val*100:+.1f}%" if roi_s_val is not None else "—",
+        delta_color="normal",
+    )
+    col_d.metric("Scommesse totali", stats_all["n"])
+
+    # Alert stagione calda
+    if roi_s_val is not None and roi_s_val >= ROI_ALERT_THRESHOLD and stats_s["n"] >= 20:
+        st.success(
+            f"🔥 **STAGIONE CALDA** — ROI stagionale {roi_s_val*100:+.1f}% su {stats_s['n']} scommesse. "
+            f"Storico: ROI > {ROI_ALERT_THRESHOLD:.0%} indica una stagione con edge reale. "
+            f"Considera di aumentare le puntate."
+        )
+    elif stats_s["n"] >= 20:
+        st.info(
+            f"📊 ROI stagionale {roi_s_val*100:+.1f}% — mercato efficiente. "
+            f"Continua a monitorare: l'alert scatta a ROI > {ROI_ALERT_THRESHOLD:.0%}."
+        )
+    else:
+        st.info(f"📊 Dati insufficienti per il monitor ROI (servono ≥ 20 scommesse, hai {stats_s['n']}).")
+
+    st.divider()
+
+    # ── Segnali giornata corrente ─────────────────────────────────────────────
+    st.subheader("Segnali prossima giornata")
+
+    QUOTE_COLS_APP = {
+        "H": ["B365H", "WHH", "IWH", "PSH", "VCH"],
+        "D": ["B365D", "WHD", "IWD", "PSD", "VCD"],
+        "A": ["B365A", "WHA", "IWA", "PSA", "VCA"],
+    }
+
+    def _quota_media(odds: dict, esito: str) -> float | None:
+        vals = [v for k, v in odds.items() if k.endswith(esito) and v > 1]
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    def _prob_gap(probs: dict) -> float:
+        sorted_p = sorted(probs.values(), reverse=True)
+        return sorted_p[0] - sorted_p[1]
+
+    def _max_quota(odds: dict) -> tuple[str, float]:
+        best_esito, best_q = "H", 0.0
+        for esito in ["H", "D", "A"]:
+            vals = [v for k, v in odds.items() if k.endswith(esito) and v > 1]
+            if vals and max(vals) > best_q:
+                best_q = max(vals)
+                best_esito = esito
+        return best_esito, best_q
+
+    if st.button("🔄 Calcola segnali giornata", type="primary"):
+        cached_matches, _ = load_odds_cache()
+        if use_mock:
+            raw_matches = get_mock_odds()
+        elif cached_matches:
+            raw_matches = cached_matches
+        else:
+            try:
+                raw_matches = get_upcoming_odds()
+                save_odds_cache(raw_matches)
+            except Exception as e:
+                st.error(f"Errore quote: {e}")
+                raw_matches = []
+
+        if raw_matches:
+            # Calcola prob e gap per ogni partita
+            enriched = []
+            for m in raw_matches:
+                odds = m["odds"]
+                probs = {
+                    "H": 1 / _quota_media(odds, "H") if _quota_media(odds, "H") else None,
+                    "D": 1 / _quota_media(odds, "D") if _quota_media(odds, "D") else None,
+                    "A": 1 / _quota_media(odds, "A") if _quota_media(odds, "A") else None,
+                }
+                if None in probs.values():
+                    continue
+                tot = sum(probs.values())
+                probs = {k: v / tot for k, v in probs.items()}
+                gap = _prob_gap(probs)
+                best_esito = max(probs, key=probs.get)
+                best_quota = _quota_media(odds, best_esito)
+                jolly_esito, jolly_quota = _max_quota(odds)
+                enriched.append({
+                    "home_team": m["home_team"],
+                    "away_team": m["away_team"],
+                    "match_date": m.get("commence_time", "")[:10],
+                    "probs": probs,
+                    "gap": gap,
+                    "best_esito": best_esito,
+                    "best_quota": best_quota,
+                    "jolly_esito": jolly_esito,
+                    "jolly_quota": jolly_quota,
+                })
+
+            # Seleziona safe: gap >= MIN_GAP, ordinate per prob_max desc
+            pool_safe = sorted(
+                [e for e in enriched if e["gap"] >= MIN_GAP],
+                key=lambda x: x["probs"][x["best_esito"]], reverse=True
+            )[:N_SAFE]
+
+            # Seleziona jolly: quota >= MIN_Q_JOLLY, ordinate per jolly_quota desc
+            pool_jolly = sorted(
+                [e for e in enriched if e["jolly_quota"] >= MIN_Q_JOLLY],
+                key=lambda x: x["jolly_quota"], reverse=True
+            )[:N_JOLLY]
+
+            if not pool_safe:
+                st.warning(f"Nessuna partita con gap ≥ {MIN_GAP:.0%}. Prova ad abbassare il threshold.")
+            else:
+                st.write(f"**✅ {len(pool_safe)} scommesse SAFE** — gioca l'esito più probabile:")
+                safe_rows = [{
+                    "Casa": e["home_team"], "Trasferta": e["away_team"],
+                    "Esito": e["best_esito"],
+                    "Prob %": f"{e['probs'][e['best_esito']]*100:.1f}",
+                    "Gap %": f"{e['gap']*100:.1f}",
+                    "Quota media": e["best_quota"],
+                } for e in pool_safe]
+                st.dataframe(pd.DataFrame(safe_rows), use_container_width=True, hide_index=True)
+
+            if not pool_jolly:
+                st.warning(f"Nessuna partita con quota jolly ≥ {MIN_Q_JOLLY}.")
+            else:
+                st.write(f"**🎲 {len(pool_jolly)} scommessa JOLLY** — gioca la quota più alta:")
+                jolly_rows = [{
+                    "Casa": e["home_team"], "Trasferta": e["away_team"],
+                    "Esito jolly": e["jolly_esito"],
+                    "Quota jolly": e["jolly_quota"],
+                } for e in pool_jolly]
+                st.dataframe(pd.DataFrame(jolly_rows), use_container_width=True, hide_index=True)
+
+            # Salva nel DB
+            scommesse_db = [
+                {
+                    "match_date": e["match_date"], "home_team": e["home_team"],
+                    "away_team": e["away_team"], "tipo": "safe",
+                    "esito": e["best_esito"], "quota": e["best_quota"],
+                    "prob_gap": e["gap"],
+                }
+                for e in pool_safe
+            ] + [
+                {
+                    "match_date": e["match_date"], "home_team": e["home_team"],
+                    "away_team": e["away_team"], "tipo": "jolly",
+                    "esito": e["jolly_esito"], "quota": e["jolly_quota"],
+                    "prob_gap": e["gap"],
+                }
+                for e in pool_jolly
+            ]
+            save_strategia_mista(scommesse_db)
+            st.caption("💾 Scommesse salvate nel DB per il tracking ROI.")
+
+    st.divider()
+
+    # ── Storico strategia mista + registra risultati ──────────────────────────
+    st.subheader("Storico scommesse strategia mista")
+    rows_sm = get_strategia_mista()
+    if not rows_sm:
+        st.info("Nessuna scommessa registrata. Clicca 'Calcola segnali giornata'.")
+    else:
+        df_sm = pd.DataFrame(rows_sm)
+
+        # Registra risultato
+        pending_sm = df_sm[df_sm["result"].isna()]
+        if not pending_sm.empty:
+            with st.expander("📝 Registra risultati reali"):
+                sel_id = st.selectbox(
+                    "Partita",
+                    options=pending_sm["id"].tolist(),
+                    format_func=lambda i: next(
+                        f"{r['home_team']} vs {r['away_team']} ({r['match_date']}) [{r['tipo']}]"
+                        for r in rows_sm if r["id"] == i
+                    ),
+                )
+                res_sm = st.radio("Risultato", ["H", "D", "A"], horizontal=True, key="res_sm")
+                if st.button("💾 Salva", key="save_sm"):
+                    set_result_strategia(sel_id, res_sm)
+                    st.success("Salvato!")
+                    st.rerun()
+
+        display_sm = ["match_date", "home_team", "away_team", "tipo", "esito", "quota", "prob_gap", "result"]
+        st.dataframe(
+            df_sm[display_sm].rename(columns={
+                "match_date": "Data", "home_team": "Casa", "away_team": "Trasferta",
+                "tipo": "Tipo", "esito": "Esito", "quota": "Quota",
+                "prob_gap": "Gap", "result": "Risultato",
             }),
             use_container_width=True, hide_index=True,
         )
