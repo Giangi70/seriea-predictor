@@ -185,23 +185,77 @@ Aggiornato `app.py`:
 
 ---
 
+## Sessione del 22/05/2026 — Strategia Mista + Analisi Ciclicità
+
+### Obiettivo
+Studiare una politica di scommesse basata su budget fisso (1€/partita):
+- **N_safe** partite sull'esito più probabile
+- **N_jolly** partite sulla quota più alta (evento raro)
+
+### Dati estesi a 9 stagioni
+Scaricati i CSV delle stagioni 1617, 1718, 1819, 1920 da football-data.co.uk.
+Totale: 3420 partite su 9 stagioni (2016/17 → 2024/25).
+I CSV extra sono caricati direttamente dal notebook senza toccare il dataset processato del progetto.
+
+### Analisi backtest (`notebooks/analisi_strategia_mista.py`)
+
+**Risultato principale**: la strategia 10-safe + 1-jolly ha ROI positivo aggregato (+10%), ma con forte variabilità stagionale:
+
+| Stagione | ROI (10+1, jolly>5€) |
+|---|---|
+| 1617 | +2.7% |
+| 1718 | +2.3% |
+| 1819 | +23.3% |
+| 1920 | +19.9% |
+| 2021 | +28.6% (COVID) |
+| 2122 | +11.3% |
+| 2223 | +0.9% |
+| 2324 | +1.0% |
+| 2425 | +1.2% |
+
+**Ipotesi ciclicità**: il segnale è forte nel periodo 2019–2022 (probabile cambio modelli bookmaker) e si azzera nelle ultime 3 stagioni. Il mercato si riallinea periodicamente.
+
+**Filtro gap probabilità**: escludere le partite con gap < 15% tra prob_max e prob_seconda migliora l'accuratezza ma non recupera l'edge nelle ultime stagioni.
+
+**Strategia ottimale robusta** (ultime 3 stagioni): `n_safe=9, n_jolly=1, min_gap=0.15, min_q_jolly=5.0` → ROI +4.5%, 240 scommesse.
+
+### Implementazione nel progetto
+
+**`src/db/storage.py`**: aggiunta tabella `strategia_mista` con funzioni:
+- `save_strategia_mista()` — salva le scommesse della giornata
+- `get_strategia_mista()` — lista completa
+- `set_result_strategia()` — registra risultato reale
+- `get_roi_strategia()` — calcola ROI, filtrabile per stagione
+
+**`src/ui/app.py`**: nuovo tab **🎯 Strategia Mista** con:
+- Segnali giornata: 9 safe + 1 jolly calcolati dalle quote live
+- Monitor ROI stagionale progressivo
+- Alert 🔥 "stagione calda" se ROI ≥ 8% con ≥ 20 scommesse
+- Storico scommesse + registrazione risultati reali
+
+---
+
+## Stato attuale (22/05/2026)
+
+| Componente | Stato |
+|---|---|
+| Download dati storici | ✅ Funzionante |
+| Preprocessing | ✅ Funzionante (include date/squadre) |
+| Training modello | ✅ Funzionante (51.1% CV accuracy) |
+| Inferenza + Value Bet filter | ✅ Funzionante |
+| Analisi value betting | ✅ Completata (vedi AnalisiValueBetting.md) |
+| Quote live (API) | ✅ Funzionante con API key reale |
+| UI Streamlit | ✅ 5 tab (+ Strategia Mista) |
+| Persistenza SQLite | ✅ Funzionante (predizioni + risultati + strategia mista) |
+| Strategia Mista | ✅ Backtest 9 stagioni + monitor ROI + alert stagione calda |
+
+---
+
 ## Prossimi passi possibili
 
-1. **Ottenere API key** da [the-odds-api.com](https://the-odds-api.com/) e testarla con quote reali
-
-2. **Analisi esplorativa** — aprire un notebook in `notebooks/` per visualizzare:
-   - Correlazione tra divergenza bookmaker e accuratezza predizione
-   - Feature importance del modello
-   - Calibrazione delle probabilità
-
-3. **Migliorare il modello** — aggiungere feature:
-   - Movimento delle quote nel tempo (se disponibile)
-   - Stagione come feature categorica
-   - Forma recente delle squadre (da altri dataset)
-
-4. **Persistenza risultati** — salvare le predizioni e i risultati reali in SQLite per tracciare le performance nel tempo
-
-5. **App Android** — seconda idea discussa, da sviluppare separatamente
+1. **Monitorare la stagione 2025/26** — il monitor ROI nel tab Strategia Mista dirà se siamo in una nuova stagione "calda"
+2. **Riaddestrare con 9 stagioni** — valutare se aggiungere le stagioni 1617-1920 al training migliora l'accuratezza del modello ML
+3. **App Android** — seconda idea discussa, da sviluppare separatamente
 
 ---
 

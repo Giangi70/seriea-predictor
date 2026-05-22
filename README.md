@@ -13,7 +13,7 @@ I bookmaker usano modelli avanzati per stimare le probabilità di ogni esito. Qu
 | Linguaggio | Python 3.11+ |
 | ML | XGBoost + scikit-learn |
 | UI | Streamlit |
-| Database locale | SQLite (futuro) |
+| Database locale | SQLite |
 | Quote live | The Odds API |
 | Dati storici | football-data.co.uk |
 
@@ -28,7 +28,10 @@ seriea-predictor/
 │   └── processed/          # Dataset pulito pronto per il training
 ├── models/
 │   └── model.joblib        # Modello addestrato (XGBoost + LabelEncoder + feature list)
-├── notebooks/              # Analisi esplorative
+├── notebooks/
+│   ├── analisi_value_betting.py        # Backtest filtro value bet
+│   ├── analisi_tendenze_stagionali.py  # Analisi tendenze per squadra
+│   └── analisi_strategia_mista.py     # Backtest strategia 9-safe+1-jolly su 9 stagioni
 ├── src/
 │   ├── scraper/
 │   │   ├── download_historical.py  # Scarica CSV storici (5 stagioni)
@@ -38,8 +41,13 @@ seriea-predictor/
 │   │   └── train.py                # Training XGBoost + cross-validation
 │   ├── prediction/
 │   │   └── predict.py              # Inferenza su nuove partite
+│   ├── analysis/
+│   │   └── team_tendencies.py      # Tendenze stagionali per squadra
+│   ├── db/
+│   │   ├── storage.py              # SQLite: predizioni, risultati, strategia mista
+│   │   └── update_results.py       # Match automatico predizioni → risultati CSV
 │   └── ui/
-│       └── app.py                  # App Streamlit
+│       └── app.py                  # App Streamlit (5 tab)
 ├── .env.example            # Template variabili d'ambiente
 ├── requirements.txt        # Dipendenze Python
 └── README.md
@@ -112,7 +120,7 @@ Apre l'app nel browser su `http://localhost:8501`.
 
 ## Utilizzo dell'app
 
-L'app ha 3 sezioni:
+L'app ha 5 sezioni:
 
 ### 🔮 Predizioni giornata
 Carica automaticamente le quote della prossima giornata via The Odds API e mostra le predizioni per ogni partita con le probabilità di 1/X/2.
@@ -126,6 +134,17 @@ Inserisci le quote a mano per una singola partita. Supporta Bet365, William Hill
 Dopo ogni giornata:
 1. Clicca **"Scarica nuovi dati storici"** per aggiornare i CSV
 2. Clicca **"Ri-addestra modello"** per includere le nuove partite
+
+### 📊 Storico
+Tabella completa delle predizioni salvate con possibilità di registrare il risultato reale e calcolare il ROI live sulle value bet.
+
+### 🎯 Strategia Mista
+Implementa la strategia **9-safe + 1-jolly** derivata dall'analisi backtest su 9 stagioni:
+- **9 scommesse safe**: le 9 partite con gap di probabilità più alto (esito più probabile)
+- **1 scommessa jolly**: la partita con la quota più alta (≥ 5.0)
+- **Filtro gap**: esclude le partite incerte (gap prob < 15%)
+- **Monitor ROI stagionale**: accumula i risultati reali e calcola il ROI progressivo
+- **Alert stagione calda** 🔥: avvisa se il ROI stagionale supera l'8% (segnale che il mercato potrebbe aver perso efficienza)
 
 ## Feature del modello
 

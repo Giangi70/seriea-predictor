@@ -148,3 +148,11 @@ Il ROI è quasi identico. Il motivo: le quote già incorporano la forma della sq
 Nessun TODO aperto. Il sistema è completo e pronto per l'uso in produzione.
 
 Prossimo passo operativo: dopo la giornata del 17/05/2026, scaricare i CSV aggiornati e cliccare "Aggiorna risultati" per verificare il ciclo completo.
+
+---
+
+## Analisi Strategia Mista (22/05/2026)
+
+Vedi documento separato: `notebooks/analisi_strategia_mista.py` e sezione dedicata in `ComeNasce.md`.
+
+In sintesi: il filtro value bet (prob_A > 0.45, std_A < 0.0417) rimane valido come segnale di lungo periodo, ma il ROI si è azzerato nelle ultime 3 stagioni (2223-2425). La nuova strategia mista 9-safe+1-jolly con monitor ROI stagionale è il complemento operativo: permette di intercettare automaticamente le stagioni in cui il mercato torna inefficiente.
