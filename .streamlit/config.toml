@@ -1,0 +1,9 @@
+[server]
+# headless: nessun tentativo di aprire un browser locale (richiesto in cloud)
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
