@@ -49,6 +49,41 @@ Così l'app è autonoma: apri l'URL e funziona subito, senza attese.
 
 ---
 
+## Prerequisiti critici (lezioni dal deploy reale del 02/11/2026)
+
+Due cose, se mancano, fanno fallire il deploy:
+
+### 1. Repo pubblici (predictor + betting-core)
+Streamlit Cloud (tier gratuito, opzione "public app") clona i repo **in anonimo**.
+Sia il predictor **sia `betting-core`** (dipendenza in `requirements.txt`) devono essere
+**pubblici**, altrimenti il clone fallisce con:
+`fatal: could not read Username for 'https://github.com'`.
+
+### 2. Python 3.11 obbligatorio (`.python-version`)
+Di default Streamlit Cloud usa **Python 3.14**, per cui `scikit-learn==1.4.2` / `numpy==1.26.4`
+**non hanno wheel precompilati** → il build prova a compilarli dai sorgenti e fallisce con:
+`No solution found ... numpy==2.0.0rc1 ... unsatisfiable`.
+
+Soluzione: il file **`.python-version`** (contenuto: `3.11`) nella root del repo. `uv`
+(l'installer di Streamlit) lo rispetta. **NB: `runtime.txt` viene ignorato** da Streamlit/uv.
+In alternativa/aggiunta: pannello app → Settings → Python version → 3.11.
+Python 3.11 ha i wheel per tutte le versioni pinnate e coincide con l'ambiente di training.
+
+### 3. ODDS_API_KEY nei Secrets, NON nel .env
+Il file `.env` è locale e NON arriva sul cloud (è nel `.gitignore`). Se l'app dice
+`ODDS_API_KEY non configurata nel file .env`, la chiave va messa nei **Secrets** di Streamlit
+(⋮ → Settings → Secrets), in formato TOML:
+```
+ODDS_API_KEY = "la_tua_chiave"
+```
+Senza chiave l'app funziona comunque in modalità mock (toggle "Usa dati di esempio").
+
+### Nota: throttling
+Dopo molti rebuild ravvicinati, Streamlit può applicare un **throttle** (CPU ridotta,
+l'app resta online). Non è un errore: scade da solo dopo qualche ora. Evitare reboot ripetuti.
+
+---
+
 ## Flusso a regime
 
 Dopo il setup, ogni push aggiorna l'app automaticamente:
